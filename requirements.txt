@@ -2,3 +2,10 @@ fastapi
 uvicorn[standard]
 python-dotenv
 openai
+llama-index
+llama-index-llms-azure-openai
+llama-index-embeddings-azure-openai
+llama-index-vector-stores-azureaisearch
+pypdf
+azure-search-documents
+azure-core
