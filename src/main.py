@@ -1,35 +1,88 @@
 import os
+import logging
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from pydantic import BaseModel
+from llama_index.core import VectorStoreIndex, Settings
+from llama_index.vector_stores.azureaisearch import AzureAISearchVectorStore
+from llama_index.llms.azure_openai import AzureOpenAI
+from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
+from azure.search.documents.indexes import SearchIndexClient
+from azure.core.credentials import AzureKeyCredential
 
-# Load environment variables from .env file
+# --- Initial Setup ---
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- 1. CONFIGURE AZURE OPENAI CLIENT ---
-# Best practice: create the client once and reuse it
-try:
-    client = AzureOpenAI(
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-    )
-    AZURE_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-except Exception as e:
-    print(f"Error configuring Azure OpenAI client: {e}")
-    client = None
-    AZURE_DEPLOYMENT_NAME = None
+# --- Azure & LlamaIndex Config ---
+def initialize_query_engine():
+    """
+    Initializes and returns a LlamaIndex query engine connected to Azure services.
+    """
+    try:
+        # Azure AI Search settings
+        AZURE_AI_SEARCH_ENDPOINT = os.getenv("AZURE_AI_SEARCH_ENDPOINT")
+        AZURE_AI_SEARCH_KEY = os.getenv("AZURE_AI_SEARCH_KEY")
+        AZURE_AI_SEARCH_INDEX_NAME = os.getenv("AZURE_AI_SEARCH_INDEX_NAME")
 
-# --- 2. DEFINE DATA MODELS ---
-# Pydantic models for structured request and response data
+        # Azure OpenAI settings
+        AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+        AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+
+        AZURE_OPENAI_DEPLOYMENT_NAME_LLM = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME_LLM")
+        AZURE_OPENAI_API_VERSION_LLM = os.getenv("AZURE_OPENAI_API_VERSION_LLM")
+
+        AZURE_OPENAI_DEPLOYMENT_NAME_EMBEDDING = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME_EMBEDDING")
+        AZURE_OPENAI_API_VERSION_EMBEDDING = os.getenv("AZURE_OPENAI_API_VERSION_EMBEDDING")
+        
+        # Configure LlamaIndex settings
+        Settings.llm = AzureOpenAI(
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_key=AZURE_OPENAI_API_KEY,
+            deployment_name=AZURE_OPENAI_DEPLOYMENT_NAME_LLM,
+            api_version=AZURE_OPENAI_API_VERSION_LLM,
+        )
+        Settings.embed_model = AzureOpenAIEmbedding(
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_key=AZURE_OPENAI_API_KEY,
+            deployment_name=AZURE_OPENAI_DEPLOYMENT_NAME_EMBEDDING,
+            api_version=AZURE_OPENAI_API_VERSION_EMBEDDING,
+        )
+
+        # Connect to the Azure AI Search Vector Store
+        index_client = SearchIndexClient(endpoint=AZURE_AI_SEARCH_ENDPOINT, credential=AzureKeyCredential(AZURE_AI_SEARCH_KEY))
+        vector_store = AzureAISearchVectorStore(
+            search_or_index_client=index_client,
+            index_name=AZURE_AI_SEARCH_INDEX_NAME,
+            id_field_key="id",
+            chunk_field_key="chunk",
+            embedding_field_key="embedding",
+            embedding_dimensionality=1536,
+            metadata_string_field_key="metadata",
+            doc_id_field_key="doc_id",
+        )
+
+        # Build the index and query engine
+        index = VectorStoreIndex.from_vector_store(vector_store)
+        query_engine = index.as_query_engine(verbose=True)
+        
+        logging.info("Successfully initialized query engine.")
+        return query_engine
+
+    except Exception as e:
+        logging.error(f"Failed to initialize query engine: {e}")
+        return None
+
+query_engine = initialize_query_engine()
+
+# --- FastAPI ---
 class ChatRequest(BaseModel):
     message: str
 
 class ChatResponse(BaseModel):
     reply: str
 
-# --- 3. SETUP FASTAPI APP ---
 app = FastAPI(
     title="AI HR Onboarding Assistant API",
     description="An API for interacting with the AI HR Onboarding Assistant.",
@@ -46,22 +99,16 @@ def chat_with_ai(request: ChatRequest):
     """
     Handles a chat request from the user and returns a response from the AI.
     """
-    if not client:
-        return {"reply": "Error: Azure OpenAI client is not configured."}
+    if not query_engine:
+        return {"reply": "Error: Query engine is not configured."}
 
-    completion = client.chat.completions.create(
-        model=AZURE_DEPLOYMENT_NAME,
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a helpful HR assistant.",
-            },
-            {
-                "role": "user",
-                "content": request.message,
-            },
-        ],
-    )
+    logging.info(f"Received query: {request.message}")
+
+    # Query the engine with the user's message
+    response = query_engine.query(request.message)
     
-    reply = completion.choices[0].message.content
-    return {"reply": reply}
+    reply_text = str(response)
+    
+    logging.info(f"Generated response: {reply_text}")
+
+    return ChatResponse(reply=reply_text)
