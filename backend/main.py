@@ -1,10 +1,13 @@
 import os
 import logging
+from typing import List, Dict
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from pydantic import BaseModel
 from llama_index.core import VectorStoreIndex, Settings
+from llama_index.core.memory import ChatMemoryBuffer
+from llama_index.core.llms import ChatMessage, MessageRole
 from llama_index.vector_stores.azureaisearch import AzureAISearchVectorStore
 from llama_index.llms.azure_openai import AzureOpenAI
 from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
@@ -15,10 +18,12 @@ from azure.core.credentials import AzureKeyCredential
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+global_memory = ChatMemoryBuffer.from_defaults(token_limit=3000)
+
 # --- Azure & LlamaIndex Config ---
-def initialize_query_engine():
+def initialize_chat_engine():
     """
-    Initializes and returns a LlamaIndex query engine connected to Azure services.
+    Initializes and returns a LlamaIndex chat engine connected to Azure services.
     """
     try:
         # Azure AI Search settings
@@ -63,22 +68,30 @@ def initialize_query_engine():
             doc_id_field_key="doc_id",
         )
 
-        # Build the index and query engine
+        # Build the index and chat engine
         index = VectorStoreIndex.from_vector_store(vector_store)
-        query_engine = index.as_query_engine(verbose=True)
-        
-        logging.info("Successfully initialized query engine.")
-        return query_engine
+
+        # Create the chat engine
+        chat_engine = index.as_chat_engine(
+            chat_mode="context",
+            memory=global_memory,
+            system_prompt="You are a friendly and helpful assistant. Answer the user's questions based on the context provided. Answer in a concise, short and clear manner.",
+            verbose=True,
+        )
+                
+        logging.info("Successfully initialized chat engine.")
+        return chat_engine
 
     except Exception as e:
-        logging.error(f"Failed to initialize query engine: {e}")
+        logging.error(f"Failed to initialize chat engine: {e}")
         return None
 
-query_engine = initialize_query_engine()
+chat_engine = initialize_chat_engine()
 
 # --- FastAPI ---
 class ChatRequest(BaseModel):
     message: str
+    history: List[Dict[str, str]]
 
 class ChatResponse(BaseModel):
     reply: str
@@ -99,14 +112,25 @@ def chat_with_ai(request: ChatRequest):
     """
     Handles a chat request from the user and returns a response from the AI.
     """
-    if not query_engine:
-        return {"reply": "Error: Query engine is not configured."}
+    if not chat_engine:
+        return ChatResponse(reply="Error: Chat engine is not available.")
 
-    logging.info(f"Received query: {request.message}")
-
-    # Query the engine with the user's message
-    response = query_engine.query(request.message)
+    logging.info(f"Received message: {request.message} with history length: {len(request.history)}")
     
+    chat_history = [
+        ChatMessage(
+            role=MessageRole.ASSISTANT if msg["role"] == "assistant" else MessageRole.USER,
+            content=msg["content"]
+        ) for msg in request.history
+    ]
+
+    global_memory.set(chat_history)
+
+    logging.info(f"Received message: '{request.message}'. History has {len(global_memory.get())} messages.")
+
+    # Return response
+    response = chat_engine.chat(request.message)
+
     reply_text = str(response)
     
     logging.info(f"Generated response: {reply_text}")

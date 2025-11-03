@@ -9,3 +9,5 @@ llama-index-vector-stores-azureaisearch
 pypdf
 azure-search-documents
 azure-core
+streamlit
+httpx
