@@ -11,3 +11,8 @@ azure-search-documents
 azure-core
 streamlit
 httpx
+langchain
+langchain-openai
+msal
+requests
+python-multipart

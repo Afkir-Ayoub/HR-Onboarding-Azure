@@ -1,3 +1,9 @@
+# TO DO file
+TODO
+
+# Bin
+*.bin
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

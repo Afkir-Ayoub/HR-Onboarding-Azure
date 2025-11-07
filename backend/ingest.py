@@ -1,7 +1,7 @@
-import os
+"""Data ingestion script for loading documents into Azure AI Search."""
 import logging
 import sys
-from dotenv import load_dotenv
+from pathlib import Path
 from llama_index.core import (
     VectorStoreIndex,
     SimpleDirectoryReader,
@@ -14,26 +14,20 @@ from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
 from azure.search.documents.indexes import SearchIndexClient
 from azure.core.credentials import AzureKeyCredential
 
+# Works both as module and direct scirpt
+try:
+    from backend.config import settings
+except ImportError:
+    from config import settings
+
 # --- Initial Setup ---
-load_dotenv()
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stdout))
 
-# --- Configuration ---
-AZURE_AI_SEARCH_ENDPOINT = os.getenv("AZURE_AI_SEARCH_ENDPOINT")
-AZURE_AI_SEARCH_KEY = os.getenv("AZURE_AI_SEARCH_KEY")
-AZURE_AI_SEARCH_INDEX_NAME = os.getenv("AZURE_AI_SEARCH_INDEX_NAME")
+# Get the project root directory (parent of backend/)
+PROJECT_ROOT = Path(__file__).parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
 
-AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
-AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
-
-AZURE_OPENAI_DEPLOYMENT_NAME_LLM = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME_LLM")
-AZURE_OPENAI_API_VERSION_LLM = os.getenv("AZURE_OPENAI_API_VERSION_LLM")
-
-AZURE_OPENAI_DEPLOYMENT_NAME_EMBEDDING = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME_EMBEDDING")
-AZURE_OPENAI_API_VERSION_EMBEDDING = os.getenv("AZURE_OPENAI_API_VERSION_EMBEDDING")
-
-DATA_DIR = "data"
 
 # --- Ingestion Process ---
 def main():
@@ -43,28 +37,24 @@ def main():
     logging.info("Starting data ingestion process...")
 
     # Setup LlamaIndex
-    llm = AzureOpenAI(
+    Settings.llm = AzureOpenAI(
         model="gpt-4o-mini",
-        azure_endpoint=AZURE_OPENAI_ENDPOINT,
-        api_key=AZURE_OPENAI_API_KEY,
-        deployment_name=AZURE_OPENAI_DEPLOYMENT_NAME_LLM,
-        api_version=AZURE_OPENAI_API_VERSION_LLM,
+        azure_endpoint=settings.azure_openai_endpoint,
+        api_key=settings.azure_openai_api_key,
+        deployment_name=settings.azure_openai_deployment_name_llm,
+        api_version=settings.azure_openai_api_version_llm,
     )
-    embed_model = AzureOpenAIEmbedding(
+    Settings.embed_model = AzureOpenAIEmbedding(
         model="text-embedding-ada-002",
-        azure_endpoint=AZURE_OPENAI_ENDPOINT,
-        api_key=AZURE_OPENAI_API_KEY,
-        deployment_name=AZURE_OPENAI_DEPLOYMENT_NAME_EMBEDDING,
-        api_version=AZURE_OPENAI_API_VERSION_EMBEDDING,
+        azure_endpoint=settings.azure_openai_endpoint,
+        api_key=settings.azure_openai_api_key,
+        deployment_name=settings.azure_openai_deployment_name_embedding,
+        api_version=settings.azure_openai_api_version_embedding,
     )
-    
-    # Set global settings
-    Settings.llm = llm
-    Settings.embed_model = embed_model
     
     # Load Docs
     try:
-        documents = SimpleDirectoryReader(DATA_DIR).load_data()
+        documents = SimpleDirectoryReader(str(DATA_DIR)).load_data()
         if not documents:
             logging.error(f"No documents found in '{DATA_DIR}'. Please check the directory.")
             return
@@ -74,12 +64,15 @@ def main():
         return
 
     # Setup Azure AI Search Vector Store
-    index_client = SearchIndexClient(endpoint=AZURE_AI_SEARCH_ENDPOINT, credential=AzureKeyCredential(AZURE_AI_SEARCH_KEY))
+    index_client = SearchIndexClient(
+        endpoint=settings.azure_ai_search_endpoint,
+        credential=AzureKeyCredential(settings.azure_ai_search_key)
+    )
     vector_store = AzureAISearchVectorStore(
         search_or_index_client=index_client,
-        index_name=AZURE_AI_SEARCH_INDEX_NAME,
-        endpoint=AZURE_AI_SEARCH_ENDPOINT,
-        key=AZURE_AI_SEARCH_KEY,
+        index_name=settings.azure_ai_search_index_name,
+        endpoint=settings.azure_ai_search_endpoint,
+        key=settings.azure_ai_search_key,
         index_management=IndexManagement.CREATE_IF_NOT_EXISTS,
         id_field_key="id",
         chunk_field_key="chunk",
@@ -91,12 +84,14 @@ def main():
     logging.info("Azure AI Search vector store configured.")
 
     # Create and Ingest the Index
-    logging.info(f"Creating index '{AZURE_AI_SEARCH_INDEX_NAME}' and ingesting documents...")
+    logging.info(f"Creating index '{settings.azure_ai_search_index_name}' and ingesting documents...")
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
     # Creates the embeddings and stores them in Azure AI Search
     VectorStoreIndex.from_documents(documents, storage_context=storage_context)
     logging.info("Successfully created and ingested index.")
 
+
 if __name__ == "__main__":
     main()
+
