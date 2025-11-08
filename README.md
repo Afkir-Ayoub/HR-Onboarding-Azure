@@ -1,12 +1,12 @@
 # 🧠 AI HR RAG Onboarding Agent
 
-An end-to-end **AI onboarding assistant** built with Azure OpenAI, Azure AI Search, FastAPI, LlamaIndex, LangChain, and MS Graph.  
-It helps new employees onboard faster by allowing them to chat with an AI agent, search company documents via RAG, upload new documents, and interact with their Microsoft 365 calendar.
-
----
-
 ## 🎥 Demo Video
 
+https://github.com/user-attachments/assets/81c05532-c64b-4907-a848-20c8d354e901
+
+
+An end-to-end **AI onboarding assistant** built with Azure OpenAI, Azure AI Search, FastAPI, LlamaIndex, LangChain, and MS Graph.  
+It helps new employees onboard faster by allowing them to chat with an AI agent, search company documents via RAG, upload new documents, and interact with their Microsoft 365 calendar.
 
 ---
 
